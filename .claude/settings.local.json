@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:github.com)",
+      "Bash(gh api:*)",
+      "WebSearch",
+      "Bash(pnpm build:*)",
+      "Bash(chmod +x /Users/alexemery/ae/mcp-docs-rag/scripts/update-repos.sh && bash -n /Users/alexemery/ae/mcp-docs-rag/scripts/update-repos.sh && echo \"syntax ok\")",
+      "Bash(./scripts/update-repos.sh 2>&1)",
+      "Bash(mcp-docs-rag --status 2>&1)",
+      "Bash(mcp-docs-rag --index-only 2>&1)",
+      "Bash(npm link:*)"
+    ]
+  }
+}

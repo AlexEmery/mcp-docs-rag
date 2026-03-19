@@ -1,0 +1,27 @@
+{
+  "name": "mcp-docs-rag",
+  "version": "1.0.0",
+  "description": "Standalone MCP server for semantic search over documentation across multiple repositories",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "mcp-docs-rag": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc --watch",
+    "index": "node dist/index.js --index-only",
+    "index:repo": "node dist/index.js --index-only --repo"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "ollama": "^0.5.0",
+    "yaml": "^2.0.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}

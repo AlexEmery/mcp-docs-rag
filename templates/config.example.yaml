@@ -1,0 +1,34 @@
+# MCP Docs-RAG Configuration
+# Place this file at: ~/.config/mcp-docs-rag/config.yaml
+
+# Where to store embedding caches (per-repo JSON files)
+cacheDir: ~/.cache/mcp-docs-rag
+
+# Ollama server URL (run `docker compose up -d` in this repo to start it)
+ollamaHost: http://localhost:11434
+
+# Embedding model (auto-pulled on first use)
+embeddingModel: nomic-embed-text
+
+# Max characters per chunk before recursive splitting kicks in
+# Increase for broader context, decrease for more precise retrieval
+maxChunkChars: 3000
+
+# Repositories to index
+# Each key becomes a repo filter value in the search_docs tool
+repos:
+  # Example: Backend API documentation
+  # api:
+  #   label: Backend API
+  #   repoPath: ~/projects/api          # repo root (used by update-repos.sh)
+  #   docsPaths:
+  #     - ~/projects/api/docs
+  #     - ~/projects/api/reference
+  #   exclude: [drafts, archive]   # optional: skip these subdirectories
+
+  # Example: Frontend documentation
+  # frontend:
+  #   label: Frontend App
+  #   repoPath: ~/projects/web
+  #   docsPaths:
+  #     - ~/projects/web/docs

@@ -1,0 +1,5 @@
+node_modules/
+dist/
+*.embeddings.json
+.DS_Store
+.idea
