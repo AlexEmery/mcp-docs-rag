@@ -1,21 +1,56 @@
 #!/usr/bin/env node
 
+import * as fs from "fs/promises";
+import * as path from "path";
+import * as os from "os";
+import { fileURLToPath } from "url";
 import { loadConfig } from "./config.js";
 import { DocumentStore } from "./document-store.js";
 import { EmbeddingsService } from "./embeddings.js";
 import { startServer } from "./server.js";
 
-function parseArgs(): { indexOnly: boolean; repo?: string; status: boolean } {
+function parseArgs(): { indexOnly: boolean; repo?: string; status: boolean; init: boolean } {
   const args = process.argv.slice(2);
   return {
     indexOnly: args.includes("--index-only"),
     repo: args.includes("--repo") ? args[args.indexOf("--repo") + 1] : undefined,
     status: args.includes("--status"),
+    init: args.includes("--init"),
   };
+}
+
+async function runInit(): Promise<void> {
+  const configDir = path.join(os.homedir(), ".config", "mcp-docs-rag");
+  const configPath = path.join(configDir, "config.yaml");
+
+  // Check if config already exists
+  try {
+    await fs.access(configPath);
+    console.log(`Config already exists at ${configPath}`);
+    return;
+  } catch {
+    // Doesn't exist, create it
+  }
+
+  await fs.mkdir(configDir, { recursive: true });
+
+  // Copy the example template — resolve from the package root (two levels up from dist/index.js)
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const templatePath = path.join(__dirname, "..", "templates", "config.example.yaml");
+  await fs.copyFile(templatePath, configPath);
+
+  console.log(`Created config at ${configPath}`);
+  console.log(`Edit it to add your repos, then run: mcp-docs-rag --index-only`);
 }
 
 async function main(): Promise<void> {
   const flags = parseArgs();
+
+  if (flags.init) {
+    await runInit();
+    return;
+  }
+
   const config = await loadConfig();
   const currentRepo = process.env.CURRENT_REPO;
 
@@ -33,6 +68,14 @@ async function main(): Promise<void> {
       console.log(`\nCurrent repo context: ${currentRepo}`);
     }
     process.exit(0);
+  }
+
+  if (config.repos.length === 0) {
+    console.error("No repos configured. Edit ~/.config/mcp-docs-rag/config.yaml to add repos.");
+    if (flags.indexOnly) {
+      process.exit(0);
+    }
+    // Still start the server with no docs — tools will return empty results
   }
 
   console.error("Documentation sources:");

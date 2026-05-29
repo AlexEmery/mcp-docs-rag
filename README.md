@@ -23,8 +23,7 @@ This makes `mcp-docs-rag` available globally.
 ### 3. Create config
 
 ```bash
-mkdir -p ~/.config/mcp-docs-rag
-cp templates/config.example.yaml ~/.config/mcp-docs-rag/config.yaml
+mcp-docs-rag --init
 ```
 
 Edit the config to add your repos:
@@ -70,6 +69,7 @@ Or manually add to the project's `.mcp.json`:
 ## CLI
 
 ```bash
+mcp-docs-rag --init                   # Create config from template
 mcp-docs-rag                          # Index all repos + start MCP server
 mcp-docs-rag --index-only             # Index all repos, then exit
 mcp-docs-rag --index-only --repo api  # Index single repo, then exit

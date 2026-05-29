@@ -18,7 +18,7 @@ const configSchema = z.object({
   ollamaHost: z.string().default("http://localhost:11434"),
   embeddingModel: z.string().default("nomic-embed-text"),
   maxChunkChars: z.number().default(3000),
-  repos: z.record(z.string(), repoSchema),
+  repos: z.record(z.string(), repoSchema).default({}),
 });
 
 export type RepoConfig = z.infer<typeof repoSchema> & { name: string };

@@ -9,7 +9,14 @@
       "Bash(./scripts/update-repos.sh 2>&1)",
       "Bash(mcp-docs-rag --status 2>&1)",
       "Bash(mcp-docs-rag --index-only 2>&1)",
-      "Bash(npm link:*)"
+      "Bash(npm link:*)",
+      "Bash(mcp-docs-rag --status)",
+      "Bash(ln -sf /Users/alexemery/ae/mcp-docs-rag/dist/index.js /Users/alexemery/.local/bin/mcp-docs-rag)",
+      "Read(//Users/alexemery/.local/bin/**)",
+      "Bash(/Users/alexemery/.local/bin/mcp-docs-rag --status 2>&1)",
+      "Read(//Users/alexemery/bl/infra/docs/**)",
+      "Read(//Users/alexemery/bl/infra/**)",
+      "Bash(pnpm index *)"
     ]
   }
 }
