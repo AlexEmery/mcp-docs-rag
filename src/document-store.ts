@@ -66,7 +66,15 @@ export class DocumentStore {
     const excludeSet = new Set(exclude || []);
 
     async function walk(currentPath: string): Promise<void> {
-      const entries = await fs.readdir(currentPath, { withFileTypes: true });
+      let entries;
+      try {
+        entries = await fs.readdir(currentPath, { withFileTypes: true });
+      } catch (err) {
+        // A configured docsPath (or a subdirectory) may not exist or be readable.
+        // Skip it with a warning rather than crashing the whole indexing run.
+        console.error(`Skipping unreadable path "${currentPath}": ${(err as Error).message}`);
+        return;
+      }
 
       for (const entry of entries) {
         const fullPath = path.join(currentPath, entry.name);
@@ -160,7 +168,9 @@ export class DocumentStore {
 
     const paragraphs = text.split(/\n\n+/);
     if (paragraphs.length <= 1) {
-      return [{ title: parentTitle, text }];
+      // No paragraph breaks to split on (e.g. a large code block or table).
+      // Hard-split by character length so the chunk never exceeds the model's context.
+      return this.hardSplit(parentTitle, text);
     }
 
     const results: Array<{ title: string; text: string }> = [];
@@ -168,12 +178,26 @@ export class DocumentStore {
     let currentLen = 0;
     let partIndex = 1;
 
+    const flushPart = (): void => {
+      if (current.length === 0) return;
+      results.push({ title: `${parentTitle} (part ${partIndex})`, text: current.join("\n\n") });
+      current = [];
+      currentLen = 0;
+      partIndex++;
+    };
+
     for (const para of paragraphs) {
+      // A single paragraph larger than the limit can't be packed — hard-split it on its own.
+      if (para.length > this.maxChunkChars) {
+        flushPart();
+        for (const piece of this.hardSplit(parentTitle, para)) {
+          results.push({ title: `${parentTitle} (part ${partIndex})`, text: piece.text });
+          partIndex++;
+        }
+        continue;
+      }
       if (currentLen + para.length > this.maxChunkChars && current.length > 0) {
-        results.push({ title: `${parentTitle} (part ${partIndex})`, text: current.join("\n\n") });
-        current = [];
-        currentLen = 0;
-        partIndex++;
+        flushPart();
       }
       current.push(para);
       currentLen += para.length;
@@ -184,6 +208,17 @@ export class DocumentStore {
       results.push({ title, text: current.join("\n\n") });
     }
 
+    return results;
+  }
+
+  private hardSplit(title: string, text: string): Array<{ title: string; text: string }> {
+    if (text.length <= this.maxChunkChars) {
+      return [{ title, text }];
+    }
+    const results: Array<{ title: string; text: string }> = [];
+    for (let i = 0; i < text.length; i += this.maxChunkChars) {
+      results.push({ title, text: text.slice(i, i + this.maxChunkChars) });
+    }
     return results;
   }
 

@@ -16,7 +16,9 @@
       "Bash(/Users/alexemery/.local/bin/mcp-docs-rag --status 2>&1)",
       "Read(//Users/alexemery/bl/infra/docs/**)",
       "Read(//Users/alexemery/bl/infra/**)",
-      "Bash(pnpm index *)"
+      "Bash(pnpm index *)",
+      "Read(//Users/alex/api/**)",
+      "Bash(node dist/index.js --status)"
     ]
   }
 }
