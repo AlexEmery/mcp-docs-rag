@@ -34,6 +34,11 @@ Pass a path to expand a subdirectory (e.g. path: "code-review/rust/").`,
         },
       },
     },
+    annotations: {
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
   };
 }
 
@@ -63,6 +68,11 @@ Use list_docs first to discover available files, then read_doc to load the ones 
         },
       },
       required: ["repo", "path"],
+    },
+    annotations: {
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
     },
   };
 }
@@ -119,6 +129,11 @@ IF NO RESULTS: Tell the user documentation may be missing so they can improve co
         },
       },
       required: ["query"],
+    },
+    annotations: {
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
     },
   };
 }
