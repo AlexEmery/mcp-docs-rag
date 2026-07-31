@@ -1,14 +1,14 @@
 services:
   ollama:
     container_name: ollama-docs-rag
-    image: alpine/ollama:latest
+    image: ollama/ollama:latest
     restart: always
     ports:
       - "11434:11434"
     volumes:
       - ollama-data:/root/.ollama
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      test: ["CMD", "ollama", "list"]
       interval: 30s
       timeout: 10s
       retries: 5
