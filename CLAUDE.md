@@ -15,6 +15,7 @@ pnpm dev              # Watch mode compilation
 pnpm start            # Run the compiled server
 pnpm index            # Index all repos then exit
 pnpm index:repo       # Index a single repo (append -- --repo <name>)
+pnpm test             # Compile, then run dist/**/*.test.js with node --test
 
 docker compose up -d  # Start Ollama container on port 11434
 ```
@@ -23,7 +24,9 @@ After building, `npm link` makes `mcp-docs-rag` available as a global CLI comman
 
 ## Architecture
 
-**Entry flow:** `src/index.ts` parses CLI flags (`--index-only`, `--repo`, `--status`), loads config, initializes services, indexes docs, then either exits or starts the MCP server.
+**Entry flow:** `src/index.ts` parses CLI flags (`--index-only`, `--repo`, `--status`), loads config, queues an index request, waits for the pass that covers it, then either exits or (holding the index lock) loads the store from the cache and starts the MCP server.
+
+**One index pass at a time** (`src/index-queue.ts`). Every process that wants an index, `--index-only` or a server starting, writes a request into `<cacheDir>/index-queue/`. Whichever process takes `index-queue/index.lock` runs ONE pass over the union of every request queued when it starts (`all` absorbs named repos), marks each of those requests done, and frees the lock; the others wait and exit when theirs is marked done. A request that arrives during a pass waits for the next one. A lock or request left by a process that died is dropped by the next run. Before this, concurrent runs each embedded the same new chunks and each wrote the cache file, the last writer dropping the others' embeddings.
 
 **Key modules:**
 - `config.ts` — Loads YAML config from `~/.config/mcp-docs-rag/config.yaml` (override with `DOCS_RAG_CONFIG` env var). Validates with Zod. Each repo has a name, label, docsPaths array, and optional exclude list.
@@ -44,4 +47,4 @@ Config lives at `~/.config/mcp-docs-rag/config.yaml`. The `repos` field is a rec
 
 ## Tech Stack
 
-TypeScript (ES2022, NodeNext modules), MCP SDK (`@modelcontextprotocol/sdk`), Ollama client, Zod for config validation, YAML parser. No test framework configured.
+TypeScript (ES2022, NodeNext modules), MCP SDK (`@modelcontextprotocol/sdk`), Ollama client, Zod for config validation, YAML parser. Tests use node's built-in runner (`node:test`).

@@ -8,6 +8,7 @@ import { loadConfig } from "./config.js";
 import { DocumentStore } from "./document-store.js";
 import { EmbeddingsService } from "./embeddings.js";
 import { startServer } from "./server.js";
+import { indexQueued, withIndexLock, type RepoSet } from "./index-queue.js";
 
 function parseArgs(): { indexOnly: boolean; repo?: string; status: boolean; init: boolean } {
   const args = process.argv.slice(2);
@@ -84,50 +85,41 @@ async function main(): Promise<void> {
   }
   console.error(`Cache directory: ${config.cacheDir}`);
 
-  const embeddingsService = new EmbeddingsService(config.cacheDir, config.ollamaHost, config.embeddingModel);
-  const documentStore = new DocumentStore(config.repos, embeddingsService, config.maxChunkChars);
-
-  await embeddingsService.ensureModel();
-
-  const reposToIndex = flags.repo
-    ? config.repos.filter((r) => r.name === flags.repo)
-    : config.repos;
-
-  if (flags.repo && reposToIndex.length === 0) {
+  if (flags.repo && !config.repos.some((r) => r.name === flags.repo)) {
     console.error(`Unknown repo: "${flags.repo}". Available: ${config.repos.map((r) => r.name).join(", ")}`);
     process.exit(1);
   }
 
-  for (const repo of reposToIndex) {
-    await embeddingsService.loadCache(repo.name);
+  async function buildStore(repos: RepoSet): Promise<DocumentStore> {
+    const names = repos === "all" ? config.repos.map((r) => r.name) : repos;
+    const embeddingsService = new EmbeddingsService(config.cacheDir, config.ollamaHost, config.embeddingModel);
+    const documentStore = new DocumentStore(config.repos, embeddingsService, config.maxChunkChars);
+    await embeddingsService.ensureModel();
+    for (const name of names) {
+      await embeddingsService.loadCache(name);
+      await documentStore.loadDocumentation(name);
+      await documentStore.indexChunks(name);
+      await embeddingsService.saveCache(name);
+    }
+    const counts = documentStore.getRepoChunkCounts();
+    console.error(`Indexed ${documentStore.getChunkCount()} total chunks:`);
+    for (const [repo, count] of Object.entries(counts)) {
+      console.error(`  [${repo}] ${count} chunks`);
+    }
+    return documentStore;
   }
 
-  await documentStore.loadDocumentation(flags.repo);
-  await documentStore.indexChunks(flags.repo);
-
-  for (const repo of reposToIndex) {
-    await embeddingsService.saveCache(repo.name);
-  }
-
-  const counts = documentStore.getRepoChunkCounts();
-  console.error(`Indexed ${documentStore.getChunkCount()} total chunks:`);
-  for (const [repo, count] of Object.entries(counts)) {
-    console.error(`  [${repo}] ${count} chunks`);
-  }
+  const wanted: RepoSet = flags.repo ? [flags.repo] : "all";
+  await indexQueued(config.cacheDir, wanted, async (repos) => {
+    await buildStore(repos);
+  });
 
   if (flags.indexOnly) {
     console.error("Index-only mode: exiting after indexing");
     process.exit(0);
   }
 
-  if (!flags.repo) {
-    for (const repo of config.repos) {
-      if (!reposToIndex.find((r) => r.name === repo.name)) {
-        await embeddingsService.loadCache(repo.name);
-      }
-    }
-  }
-
+  const documentStore = await withIndexLock(config.cacheDir, () => buildStore(wanted));
   await startServer(documentStore, config.repos, currentRepo);
 }
 
