@@ -82,19 +82,22 @@ function waitForChange(dir: string, ms: number): Promise<void> {
   });
 }
 
-export async function withIndexLock<T>(cacheDir: string, work: () => Promise<T>, options: QueueOptions = {}): Promise<T> {
-  const pollMs = options.pollMs ?? 2000;
-  const queueDir = path.join(cacheDir, QUEUE_DIR);
-  await fs.mkdir(queueDir, { recursive: true });
-  const lockPath = path.join(queueDir, LOCK_FILE);
+// Runs work while holding lockPath, waiting for any live process that holds it first.
+export async function withFileLock<T>(lockPath: string, work: () => Promise<T>, pollMs = 2000): Promise<T> {
+  const dir = path.dirname(lockPath);
+  await fs.mkdir(dir, { recursive: true });
   while (!(await tryLock(lockPath))) {
-    await waitForChange(queueDir, pollMs);
+    await waitForChange(dir, pollMs);
   }
   try {
     return await work();
   } finally {
     await fs.unlink(lockPath).catch(() => {});
   }
+}
+
+export async function withIndexLock<T>(cacheDir: string, work: () => Promise<T>, options: QueueOptions = {}): Promise<T> {
+  return withFileLock(path.join(cacheDir, QUEUE_DIR, LOCK_FILE), work, options.pollMs);
 }
 
 export async function indexQueued(

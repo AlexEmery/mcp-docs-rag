@@ -3,3 +3,4 @@ dist/
 *.embeddings.json
 .DS_Store
 .idea
+.build.lock
