@@ -131,25 +131,24 @@ export class EmbeddingsService {
   }
 
   // Ends a repo's full pass: drops cached embeddings whose text no chunk has any more.
-  async saveCache(repoName: string): Promise<void> {
+  // Returns a one-line description of what happened to the cache, for the end-of-run summary.
+  async saveCache(repoName: string): Promise<string> {
     const repo = this.caches.get(repoName);
-    if (!repo) return;
+    if (!repo) return "no cache";
     // No chunks at all most likely means the docs folder was unreadable this
     // time; keep the cache rather than throw every embedding away.
-    if (repo.used.size === 0) return;
+    if (repo.used.size === 0) return `no chunks found, kept all ${repo.entries.size} cached embeddings`;
 
     const stale = repo.entries.size - repo.used.size;
-    if (stale === 0) {
-      console.error(`Cache for [${repoName}] has no stale entries, skipping rewrite`);
-      return;
-    }
+    if (stale === 0) return `cache kept ${repo.entries.size}, deleted 0 whose text no longer exists`;
+
     const kept: EmbeddingsCache = new Map();
     for (const key of repo.used) {
       kept.set(key, repo.entries.get(key)!);
     }
     await this.rewrite(repoName, repo, kept);
     repo.entries = kept;
-    console.error(`Saved ${kept.size} embeddings for [${repoName}] (dropped ${stale} stale)`);
+    return `cache kept ${kept.size}, deleted ${stale} whose text no longer exists`;
   }
 
   // Writes the whole cache to a temp file and renames it over the old one, so

@@ -93,16 +93,17 @@ async function main(): Promise<void> {
     const embeddingsService = new EmbeddingsService(config.cacheDir, config.ollamaHost, config.embeddingModel);
     const documentStore = new DocumentStore(config.repos, embeddingsService, config.maxChunkChars);
     await embeddingsService.ensureModel();
+    const cacheResults = new Map<string, string>();
     for (const name of names) {
       await embeddingsService.loadCache(name);
       await documentStore.loadDocumentation(name);
       await documentStore.indexChunks(name);
-      await embeddingsService.saveCache(name);
+      cacheResults.set(name, await embeddingsService.saveCache(name));
     }
     const counts = documentStore.getRepoChunkCounts();
     console.error(`Indexed ${documentStore.getChunkCount()} total chunks:`);
-    for (const [repo, count] of Object.entries(counts)) {
-      console.error(`  [${repo}] ${count} chunks`);
+    for (const name of names) {
+      console.error(`  [${name}] ${counts[name] ?? 0} chunks; ${cacheResults.get(name)}`);
     }
     return documentStore;
   }
