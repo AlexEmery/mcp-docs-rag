@@ -9,7 +9,7 @@ interface DocumentChunk {
   title: string;
   filePath: string;
   text: string;
-  embedding: number[];
+  embedding: Float32Array;
   repo: string;
   shared: boolean;
 }
@@ -110,7 +110,7 @@ export class DocumentStore {
             title: sub.title || "Untitled",
             filePath: path.relative(docsPath, filePath),
             text,
-            embedding: [],
+            embedding: new Float32Array(0),
             repo: repo.name,
             shared: isShared,
           });
