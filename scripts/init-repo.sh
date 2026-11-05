@@ -7,7 +7,7 @@ usage() {
   echo "Sets up a repo to use mcp-docs-rag:"
   echo "  - Adds the repo to ~/.config/mcp-docs-rag/config.yaml"
   echo "  - Adds/merges docs-rag server into .mcp.json"
-  echo "  - Creates .claude/commands/reindex-docs.md skill"
+  echo "  - Creates an optional .claude/commands/reindex-docs.md command"
   echo "  - Appends docs-rag tool instructions to CLAUDE.md"
   echo ""
   echo "Arguments:"
@@ -118,21 +118,19 @@ else
   echo "[create] .claude/commands/reindex-docs.md"
   mkdir -p "$skill_dir"
   cat > "$skill_file" << EOF
-Reindex the documentation for the docs-rag MCP tools (search_docs, list_docs, read_doc).
+Manually refresh the documentation cache for the docs-rag MCP tools.
 
 ## When to Use
 
-Run this after editing any documentation files in \`docs/\` during a session so that the docs-rag tools return up-to-date content.
+Documentation edits are indexed automatically. Do not run this routinely after editing docs; use it only when you explicitly want to build the on-disk cache outside the automatic schedule.
 
 ## Instructions
-
-Run the reindex command:
 
 \`\`\`bash
 mcp-docs-rag --index-only --repo $repo_key
 \`\`\`
 
-The updated index will be available on the next tool call (server restarts automatically).
+Running MCP servers reload changed caches before the next search.
 EOF
 fi
 
@@ -154,4 +152,4 @@ else
 fi
 
 echo ""
-echo "Done! Run 'mcp-docs-rag --index-only --repo $repo_key' to index docs."
+echo "Done! Docs are indexed automatically by the mcp-docs-rag daemon."

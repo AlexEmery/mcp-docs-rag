@@ -56,6 +56,20 @@ test("a half-written last record is cut off and later appends still load", async
   assert.equal(third.calls, 0);
 });
 
+test("read-only cache loading ignores a partial record without changing the file", async () => {
+  const dir = await tempCache();
+  const first = new FakeEmbeddings(dir);
+  await first.loadCache("r");
+  await first.embed("alpha", "r");
+  await fs.appendFile(binPath(dir), Buffer.from([1, 2, 3, 4, 5]));
+  const before = (await fs.stat(binPath(dir))).size;
+
+  const second = new FakeEmbeddings(dir);
+  await second.loadCache("r", { readOnly: true });
+  assert.deepEqual(Array.from(second.getCached("alpha", "r")!), [5, 97, 0.5]);
+  assert.equal((await fs.stat(binPath(dir))).size, before);
+});
+
 test("ending a pass drops embeddings for text that no chunk has any more", async () => {
   const dir = await tempCache();
   const first = new FakeEmbeddings(dir);

@@ -11,4 +11,4 @@ Three tools are available for accessing project documentation:
 2. For complex tasks, use `list_docs` then `read_doc` to load full specs/guidelines
 3. Use `search_docs` after context compaction to restore context
 4. If `search_docs` returns no results, tell the user so docs can be improved
-5. Run `/reindex-docs` after editing any files in `docs/`
+5. Documentation edits are indexed automatically; do not run a manual reindex

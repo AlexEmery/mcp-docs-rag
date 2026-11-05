@@ -4,6 +4,11 @@ import { EmbeddingsService } from "./embeddings.js";
 import { cosineSimilarity } from "./utils.js";
 import type { RepoConfig } from "./config.js";
 
+interface LexicalDocument {
+  frequencies: Map<string, number>;
+  length: number;
+}
+
 interface DocumentChunk {
   id: string;
   title: string;
@@ -12,6 +17,24 @@ interface DocumentChunk {
   embedding: Float32Array;
   repo: string;
   shared: boolean;
+  lexical: LexicalDocument;
+}
+
+function wholeTerms(text: string): string[] {
+  return text.toLowerCase().match(/[a-z0-9]+(?:[._-][a-z0-9]+)*/g) ?? [];
+}
+
+function tokenize(text: string): string[] {
+  return wholeTerms(text).flatMap((token) => [token, ...token.split(/[-_]/).flatMap((part) => [part, ...part.split(".")])]);
+}
+
+function buildLexicalDocument(filePath: string, title: string, text: string): LexicalDocument {
+  const tokens = tokenize(text);
+  for (let i = 0; i < 4; i++) tokens.push(...tokenize(filePath));
+  for (let i = 0; i < 3; i++) tokens.push(...tokenize(title));
+  const frequencies = new Map<string, number>();
+  for (const token of tokens) frequencies.set(token, (frequencies.get(token) ?? 0) + 1);
+  return { frequencies, length: tokens.length };
 }
 
 interface SearchResult {
@@ -59,6 +82,25 @@ export class DocumentStore {
     }
 
     console.error(`Created ${this.chunks.length} total documentation chunks`);
+  }
+
+  loadCachedChunks(): void {
+    const cached: DocumentChunk[] = [];
+    for (const chunk of this.chunks) {
+      const embedding = this.embeddingsService.getCached(chunk.text, chunk.repo);
+      if (embedding) {
+        chunk.embedding = embedding;
+        cached.push(chunk);
+      }
+    }
+    this.chunks = cached;
+    console.error(`Loaded ${this.chunks.length} cached documentation chunks`);
+  }
+
+  replaceRepos(repoNames: string[], updated: DocumentStore): void {
+    const replaced = new Set(repoNames);
+    this.chunks = this.chunks.filter((chunk) => !replaced.has(chunk.repo));
+    this.chunks.push(...updated.chunks.filter((chunk) => replaced.has(chunk.repo)));
   }
 
   private async getMarkdownFiles(dir: string, exclude?: string[]): Promise<string[]> {
@@ -113,6 +155,7 @@ export class DocumentStore {
             embedding: new Float32Array(0),
             repo: repo.name,
             shared: isShared,
+            lexical: buildLexicalDocument(path.relative(docsPath, filePath), sub.title || "Untitled", text),
           });
           chunkIndex++;
         }
@@ -261,6 +304,31 @@ export class DocumentStore {
     console.error("Indexing complete");
   }
 
+  private documentFrequency(candidates: DocumentChunk[], term: string): number {
+    return candidates.reduce((count, chunk) => count + (chunk.lexical.frequencies.has(term) ? 1 : 0), 0);
+  }
+
+  private keywordScores<T extends DocumentChunk>(candidates: T[], query: string): Map<T, number> {
+    const terms = [...new Set(tokenize(query))];
+    const scores = new Map<T, number>();
+    if (candidates.length === 0 || terms.length === 0) return scores;
+
+    const averageLength = candidates.reduce((sum, chunk) => sum + chunk.lexical.length, 0) / candidates.length;
+    for (const term of terms) {
+      const documentFrequency = this.documentFrequency(candidates, term);
+      if (documentFrequency === 0) continue;
+      const inverseDocumentFrequency = Math.log(1 + (candidates.length - documentFrequency + 0.5) / (documentFrequency + 0.5));
+      for (const chunk of candidates) {
+        const frequency = chunk.lexical.frequencies.get(term) ?? 0;
+        if (frequency === 0) continue;
+        const normalizedLength = chunk.lexical.length / averageLength;
+        const score = inverseDocumentFrequency * (frequency * 2.5) / (frequency + 1.5 * (0.25 + 0.75 * normalizedLength));
+        scores.set(chunk, (scores.get(chunk) ?? 0) + score);
+      }
+    }
+    return scores;
+  }
+
   async search(query: string, topK: number = 5, threshold: number = 0.3, repo?: string): Promise<SearchResponse> {
     const queryEmbedding = await this.embeddingsService.embedQuery(query);
 
@@ -273,11 +341,45 @@ export class DocumentStore {
       ...chunk,
       similarity: cosineSimilarity(queryEmbedding, chunk.embedding),
     }));
+    const semanticRanked = [...scored].sort((a, b) => b.similarity - a.similarity);
+    const semanticRanks = new Map(semanticRanked.map((chunk, rank) => [chunk, rank]));
+    const keywordScores = this.keywordScores(scored, query);
+    const keywordRanked = scored
+      .filter((chunk) => (keywordScores.get(chunk) ?? 0) > 0)
+      .sort((a, b) => (keywordScores.get(b) ?? 0) - (keywordScores.get(a) ?? 0));
+    const keywordRanks = new Map(keywordRanked.map((chunk, rank) => [chunk, rank]));
+    const lexicalCandidateCount = Math.max(50, topK * 5);
+    const combinedCandidates = new Set([
+      ...scored.filter((chunk) => chunk.similarity >= threshold),
+      ...keywordRanked.slice(0, lexicalCandidateCount),
+    ]);
+    const rareTerms = [...new Set(wholeTerms(query))].filter((term) => {
+      const frequency = this.documentFrequency(candidates, term);
+      return frequency > 0 && frequency <= Math.max(2, candidates.length * 0.1);
+    });
+    const pathTitleTerms = new Map(scored.map((chunk) => [
+      chunk,
+      new Set(tokenize(`${chunk.filePath} ${chunk.title}`)),
+    ]));
 
-    const filtered = scored
-      .filter((item) => item.similarity >= threshold)
-      .sort((a, b) => b.similarity - a.similarity)
-      .slice(0, topK);
+    const exactMatchedChunks = new Set<(typeof scored)[number]>();
+    const filtered = [...combinedCandidates]
+      .map((chunk) => {
+        const semanticRank = semanticRanks.get(chunk)!;
+        const keywordRank = keywordRanks.get(chunk);
+        const exactMatches = rareTerms.reduce((score, term) => {
+          const pathMatch = pathTitleTerms.get(chunk)!.has(term) ? 1 : 0;
+          const compoundTextMatch = /[._-]/.test(term) && chunk.lexical.frequencies.has(term) ? 2 : 0;
+          return score + pathMatch + compoundTextMatch;
+        }, 0);
+        if (exactMatches > 0) exactMatchedChunks.add(chunk);
+        const rankScore = exactMatches + 1 / (61 + semanticRank) +
+          (keywordRank !== undefined && keywordRank < lexicalCandidateCount ? 2 / (61 + keywordRank) : 0);
+        return { chunk, rankScore };
+      })
+      .sort((a, b) => b.rankScore - a.rankScore || b.chunk.similarity - a.chunk.similarity)
+      .slice(0, topK)
+      .map(({ chunk }) => chunk);
 
     const results: SearchResult[] = filtered.map((item) => ({
       section: item.title,
@@ -287,7 +389,8 @@ export class DocumentStore {
       repo: item.repo,
     }));
 
-    const missing = results.length === 0 || (results.length > 0 && results[0]!.similarity < 0.5);
+    const missing = results.length === 0 ||
+      (results.length > 0 && results[0]!.similarity < 0.5 && !exactMatchedChunks.has(filtered[0]!));
     const repoContext = repo ? ` in repo "${repo}"` : "";
     const suggestion = missing
       ? `No strong documentation match found for "${query}"${repoContext}. Consider adding documentation about this topic.`

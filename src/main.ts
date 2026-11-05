@@ -6,12 +6,14 @@ import { loadConfig } from "./config.js";
 import { DocumentStore } from "./document-store.js";
 import { EmbeddingsService } from "./embeddings.js";
 import { startServer } from "./server.js";
-import { indexQueued, withIndexLock, type RepoSet } from "./index-queue.js";
+import { indexQueued, type RepoSet } from "./index-queue.js";
+import { startAutoIndexing } from "./auto-index.js";
 
-function parseArgs(): { indexOnly: boolean; repo?: string; status: boolean; init: boolean } {
+function parseArgs(): { indexOnly: boolean; indexDaemon: boolean; repo?: string; status: boolean; init: boolean } {
   const args = process.argv.slice(2);
   return {
     indexOnly: args.includes("--index-only"),
+    indexDaemon: args.includes("--index-daemon"),
     repo: args.includes("--repo") ? args[args.indexOf("--repo") + 1] : undefined,
     status: args.includes("--status"),
     init: args.includes("--init"),
@@ -39,7 +41,7 @@ async function runInit(): Promise<void> {
   await fs.copyFile(templatePath, configPath);
 
   console.log(`Created config at ${configPath}`);
-  console.log(`Edit it to add your repos, then run: mcp-docs-rag --index-only`);
+  console.log("Edit it to add your repos, then start the indexing daemon with the repository's setup.sh.");
 }
 
 async function main(): Promise<void> {
@@ -71,8 +73,8 @@ async function main(): Promise<void> {
 
   if (config.repos.length === 0) {
     console.error("No repos configured. Edit ~/.config/mcp-docs-rag/config.yaml to add repos.");
-    if (flags.indexOnly) {
-      process.exit(0);
+    if (flags.indexOnly || flags.indexDaemon) {
+      process.exit(flags.indexDaemon ? 1 : 0);
     }
     // Still start the server with no docs — tools will return empty results
   }
@@ -88,11 +90,13 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  const namesFor = (repos: RepoSet): string[] => repos === "all" ? config.repos.map((r) => r.name) : repos;
+
   async function buildStore(repos: RepoSet): Promise<DocumentStore> {
-    const names = repos === "all" ? config.repos.map((r) => r.name) : repos;
+    const names = namesFor(repos);
     const embeddingsService = new EmbeddingsService(config.cacheDir, config.ollamaHost, config.embeddingModel);
     const documentStore = new DocumentStore(config.repos, embeddingsService, config.maxChunkChars);
-    await embeddingsService.ensureModel();
+    if (names.length > 0) await embeddingsService.ensureModel();
     const cacheResults = new Map<string, string>();
     for (const name of names) {
       await embeddingsService.loadCache(name);
@@ -108,18 +112,66 @@ async function main(): Promise<void> {
     return documentStore;
   }
 
-  const wanted: RepoSet = flags.repo ? [flags.repo] : "all";
-  await indexQueued(config.cacheDir, wanted, async (repos) => {
-    await buildStore(repos);
-  });
+  async function loadCachedStore(repos: RepoSet): Promise<DocumentStore> {
+    const embeddingsService = new EmbeddingsService(config.cacheDir, config.ollamaHost, config.embeddingModel);
+    const documentStore = new DocumentStore(config.repos, embeddingsService, config.maxChunkChars);
+    for (const name of namesFor(repos)) {
+      await embeddingsService.loadCache(name, { readOnly: true });
+      await documentStore.loadDocumentation(name);
+    }
+    documentStore.loadCachedChunks();
+    return documentStore;
+  }
 
+  const wanted: RepoSet = flags.repo ? [flags.repo] : "all";
   if (flags.indexOnly) {
+    await indexQueued(config.cacheDir, wanted, async (repos) => {
+      await buildStore(repos);
+    });
     console.error("Index-only mode: exiting after indexing");
     process.exit(0);
   }
 
-  const documentStore = await withIndexLock(config.cacheDir, () => buildStore(wanted));
-  await startServer(documentStore, config.repos, currentRepo);
+  if (flags.indexDaemon) {
+    const daemonRepos = config.repos.filter((repo) => namesFor(wanted).includes(repo.name));
+    const autoIndexing = startAutoIndexing(daemonRepos, async (repos) => {
+      await indexQueued(config.cacheDir, repos, async (batch) => {
+        await buildStore(batch);
+      });
+      console.error("Automatic indexing complete");
+    });
+    console.error("Documentation indexing daemon running");
+    process.once("SIGTERM", autoIndexing.close);
+    process.once("SIGINT", autoIndexing.close);
+    return;
+  }
+
+  async function cacheVersion(): Promise<string> {
+    const versions = await Promise.all(namesFor(wanted).map(async (name) => {
+      const stat = await fs.stat(path.join(config.cacheDir, `${name}.embeddings.bin`)).catch(() => null);
+      return `${name}:${stat?.mtimeMs ?? 0}:${stat?.size ?? 0}`;
+    }));
+    return versions.join("|");
+  }
+
+  let loadedCacheVersion = await cacheVersion();
+  const documentStore = await loadCachedStore(wanted);
+  let refreshing: Promise<void> | undefined;
+  async function refreshCache(): Promise<void> {
+    if (refreshing) return refreshing;
+    refreshing = (async () => {
+      const version = await cacheVersion();
+      if (version === loadedCacheVersion) return;
+      const updated = await loadCachedStore(wanted);
+      documentStore.replaceRepos(namesFor(wanted), updated);
+      loadedCacheVersion = version;
+    })().finally(() => {
+      refreshing = undefined;
+    });
+    return refreshing;
+  }
+
+  await startServer(documentStore, config.repos, currentRepo, refreshCache);
 }
 
 main().catch((error) => {

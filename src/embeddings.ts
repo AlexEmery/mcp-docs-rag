@@ -64,7 +64,7 @@ export class EmbeddingsService {
     return path.join(this.cacheDir, `${repoName}.embeddings.json`);
   }
 
-  async loadCache(repoName: string): Promise<void> {
+  async loadCache(repoName: string, options: { readOnly?: boolean } = {}): Promise<void> {
     const repo: RepoCache = { entries: new Map(), used: new Set(), dim: null };
     this.caches.set(repoName, repo);
 
@@ -76,18 +76,18 @@ export class EmbeddingsService {
     }
 
     if (data) {
-      await this.readRecords(repoName, repo, data);
-    } else if (!(await this.convertLegacyCache(repoName, repo))) {
+      await this.readRecords(repoName, repo, data, !options.readOnly);
+    } else if (options.readOnly || !(await this.convertLegacyCache(repoName, repo))) {
       console.error(`No existing cache for [${repoName}], starting fresh`);
       return;
     }
     console.error(`Loaded ${repo.entries.size} cached embeddings for [${repoName}]`);
   }
 
-  private async readRecords(repoName: string, repo: RepoCache, data: Buffer): Promise<void> {
+  private async readRecords(repoName: string, repo: RepoCache, data: Buffer, repair: boolean): Promise<void> {
     if (data.length < HEADER_BYTES || !data.subarray(0, MAGIC.length).equals(MAGIC)) {
       console.error(`Cache file for [${repoName}] is not a cache file, starting fresh`);
-      await fs.rm(this.getCachePath(repoName), { force: true });
+      if (repair) await fs.rm(this.getCachePath(repoName), { force: true });
       return;
     }
     const dim = data.readUInt32LE(MAGIC.length);
@@ -107,7 +107,7 @@ export class EmbeddingsService {
     // A crash mid-append leaves part of a record at the end; cut it off so the
     // next append starts on a record boundary.
     const wholeBytes = HEADER_BYTES + count * recordBytes;
-    if (wholeBytes < data.length) {
+    if (repair && wholeBytes < data.length) {
       await fs.truncate(this.getCachePath(repoName), wholeBytes);
     }
   }
@@ -197,6 +197,10 @@ export class EmbeddingsService {
 
   private getCacheKey(text: string): string {
     return crypto.createHash("sha256").update(text).digest("hex");
+  }
+
+  getCached(text: string, repoName: string): Float32Array | undefined {
+    return this.caches.get(repoName)?.entries.get(this.getCacheKey(text));
   }
 
   private getCache(repoName: string): RepoCache {

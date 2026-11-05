@@ -100,6 +100,11 @@ SHARED KNOWLEDGE (no filter needed):
 - Documents tagged with <!-- @shared --> appear in all repo searches
 - Protocol concepts, cross-repo conventions, shared business logic
 
+HOW TO QUERY:
+- Include strategy IDs, config keys, and filenames verbatim (e.g. "s71", "f1_qualifying_rule")
+- Use natural language for concepts without a known identifier
+- Results are the top matches, not exhaustive. If an expected topic is missing, retry with its exact identifier or read_doc a known path
+
 WHEN TO USE 'repo' FILTER:
 - Use repo filter for implementation-specific patterns (e.g., testing, code style)
 - OMIT repo for shared concepts, protocol docs, cross-project knowledge
@@ -109,13 +114,14 @@ USE THIS TOOL CONSTANTLY:
 - After context compaction (to restore context)
 - Whenever uncertain about a pattern
 ${currentRepoTip}
+Documentation changes are indexed automatically. Do not run or suggest a manual reindex after editing docs.
 IF NO RESULTS: Tell the user documentation may be missing so they can improve coverage.`,
     inputSchema: {
       type: "object" as const,
       properties: {
         query: {
           type: "string",
-          description: "Natural language search query for documentation",
+          description: "Natural-language query or exact strategy ID, config key, or filename",
         },
         top_k: {
           type: "number",
@@ -141,7 +147,8 @@ IF NO RESULTS: Tell the user documentation may be missing so they can improve co
 export async function startServer(
   documentStore: DocumentStore,
   repos: RepoConfig[],
-  currentRepo?: string
+  currentRepo?: string,
+  beforeSearch?: () => Promise<void>
 ): Promise<void> {
   const server = new Server(
     {
@@ -174,6 +181,7 @@ export async function startServer(
       };
 
       try {
+        await beforeSearch?.();
         const searchResponse = await documentStore.search(
           args.query,
           args.top_k || 5,
